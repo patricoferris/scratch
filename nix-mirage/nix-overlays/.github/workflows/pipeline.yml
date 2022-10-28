@@ -1,0 +1,215 @@
+name: Pipeline
+on:
+  pull_request:
+    branches:
+    - master
+  push:
+    branches:
+      - master
+jobs:
+  nix-fmt-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          nix_path: nixpkgs=channel:nixpkgs-unstable
+      - name: fmt
+        run: |
+          find . -iname '*.nix' | xargs nix shell -f ./ nixpkgs-fmt -c nixpkgs-fmt --check
+      - name: check
+        run: |
+          nix flake check
+
+  native-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        setup:
+          - { ocaml-version: 4_13, continue-on-error: false }
+          - { ocaml-version: 4_14, continue-on-error: false }
+          - { ocaml-version: 5_0, continue-on-error: false }
+    name: Native packages (Linux, OCaml ${{ matrix.setup.ocaml-version }})
+    runs-on: ubuntu-latest
+    env:
+      NIXPKGS_ALLOW_UNFREE: 1
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ secrets.GH_PAT_ANMONTEIRO }}
+
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-substituters = https://anmonteiro.nix-cache.workers.dev
+            extra-trusted-public-keys = ocaml.nix-cache.com-1:/xI2h2+56rwFfKyyFVbkJSeGqSIYMC/Je+7XXqGKDIY=
+      - uses: nix-ocaml/nix-s3-action@fork
+        with:
+          endpoint: "s3://overlays?endpoint=https://7a53c28e9b7a91239f9ed42da04276bc.r2.cloudflarestorage.com"
+          signingKey: ${{ secrets.R2_SIGNING_KEY }}
+          awsAccessKeyId: ${{ secrets.R2_ACCESS_KEY_ID }}
+          awsSecretAccessKey: ${{ secrets.R2_SECRET_ACESS_KEY }}
+      - name: Build nix packages
+        run: |
+          nix shell --print-build-logs -f ./ nix-build-uncached -c \
+              nix-build-uncached ./ci \
+                --argstr ocamlVersion ${{ matrix.setup.ocaml-version }} \
+                --argstr target native \
+                --show-trace --keep-going
+        continue-on-error: ${{ matrix.setup.continue-on-error }}
+
+  top-level-packages-linux:
+    strategy:
+      fail-fast: false
+    name: Native (Top-level) packages (Linux)
+    runs-on: ubuntu-latest
+    env:
+      NIXPKGS_ALLOW_UNFREE: 1
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ secrets.GH_PAT_ANMONTEIRO }}
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-substituters = https://anmonteiro.nix-cache.workers.dev
+            extra-trusted-public-keys = ocaml.nix-cache.com-1:/xI2h2+56rwFfKyyFVbkJSeGqSIYMC/Je+7XXqGKDIY=
+      - uses: nix-ocaml/nix-s3-action@fork
+        with:
+          endpoint: "s3://overlays?endpoint=https://7a53c28e9b7a91239f9ed42da04276bc.r2.cloudflarestorage.com"
+          signingKey: ${{ secrets.R2_SIGNING_KEY }}
+          awsAccessKeyId: ${{ secrets.R2_ACCESS_KEY_ID }}
+          awsSecretAccessKey: ${{ secrets.R2_SECRET_ACESS_KEY }}
+      - name: Build nix packages
+        run: |
+          nix shell --print-build-logs -f ./ nix-build-uncached -c \
+              nix-build-uncached ./ci \
+                --arg ocamlVersion null \
+                --argstr target top-level-packages \
+                --show-trace --keep-going
+
+  native-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        setup:
+          - { ocaml-version: 4_14, continue-on-error: false }
+          - { ocaml-version: 5_0, continue-on-error: false }
+    name: Native packages (macOS, OCaml ${{ matrix.setup.ocaml-version }})
+    runs-on: macos-latest
+    env:
+      NIXPKGS_ALLOW_UNFREE: 1
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ secrets.GH_PAT_ANMONTEIRO }}
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-substituters = https://anmonteiro.nix-cache.workers.dev
+            extra-trusted-public-keys = ocaml.nix-cache.com-1:/xI2h2+56rwFfKyyFVbkJSeGqSIYMC/Je+7XXqGKDIY=
+      - uses: nix-ocaml/nix-s3-action@fork
+        with:
+          endpoint: "s3://overlays?endpoint=https://7a53c28e9b7a91239f9ed42da04276bc.r2.cloudflarestorage.com"
+          signingKey: ${{ secrets.R2_SIGNING_KEY }}
+          awsAccessKeyId: ${{ secrets.R2_ACCESS_KEY_ID }}
+          awsSecretAccessKey: ${{ secrets.R2_SECRET_ACESS_KEY }}
+      - name: Build nix packages
+        run: |
+          nix shell --print-build-logs -f ./ nix-build-uncached -c \
+              nix-build-uncached ./ci \
+                --argstr ocamlVersion ${{ matrix.setup.ocaml-version }} \
+                --argstr target native \
+                --show-trace --keep-going
+        continue-on-error: ${{ matrix.setup.continue-on-error }}
+
+  top-level-packages-macos:
+    strategy:
+      fail-fast: false
+    name: Native (Top-level) packages (macOS)
+    runs-on: macos-latest
+    env:
+      NIXPKGS_ALLOW_UNFREE: 1
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ secrets.GH_PAT_ANMONTEIRO }}
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-substituters = https://anmonteiro.nix-cache.workers.dev
+            extra-trusted-public-keys = ocaml.nix-cache.com-1:/xI2h2+56rwFfKyyFVbkJSeGqSIYMC/Je+7XXqGKDIY=
+      - uses: nix-ocaml/nix-s3-action@fork
+        with:
+          endpoint: "s3://overlays?endpoint=https://7a53c28e9b7a91239f9ed42da04276bc.r2.cloudflarestorage.com"
+          signingKey: ${{ secrets.R2_SIGNING_KEY }}
+          awsAccessKeyId: ${{ secrets.R2_ACCESS_KEY_ID }}
+          awsSecretAccessKey: ${{ secrets.R2_SECRET_ACESS_KEY }}
+      - name: Build nix packages
+        run: |
+          nix shell --print-build-logs -f ./ nix-build-uncached -c \
+              nix-build-uncached ./ci \
+                --arg ocamlVersion null \
+                --argstr target top-level-packages \
+                --show-trace --keep-going
+
+  cross-compilers:
+    needs: [native-linux]
+    strategy:
+      fail-fast: false
+      matrix:
+        setup:
+          - { ocaml-version: 4_13, continue-on-error: false }
+          - { ocaml-version: 4_14, continue-on-error: false }
+          - { ocaml-version: 5_0, continue-on-error: false }
+        target:
+          - arm64
+          - musl
+    name: ${{matrix.target}} packages (OCaml ${{ matrix.setup.ocaml-version }})
+    runs-on: ubuntu-latest
+    env:
+      NIXPKGS_ALLOW_UNFREE: 1
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+        with:
+          access_token: ${{ secrets.GH_PAT_ANMONTEIRO }}
+
+      - uses: actions/checkout@v3
+      - uses: cachix/install-nix-action@v18
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            system-features = nixos-test benchmark big-parallel kvm
+            extra-substituters = https://anmonteiro.nix-cache.workers.dev
+            extra-trusted-public-keys = ocaml.nix-cache.com-1:/xI2h2+56rwFfKyyFVbkJSeGqSIYMC/Je+7XXqGKDIY=
+      - uses: nix-ocaml/nix-s3-action@fork
+        with:
+          endpoint: "s3://overlays?endpoint=https://7a53c28e9b7a91239f9ed42da04276bc.r2.cloudflarestorage.com"
+          signingKey: ${{ secrets.R2_SIGNING_KEY }}
+          awsAccessKeyId: ${{ secrets.R2_ACCESS_KEY_ID }}
+          awsSecretAccessKey: ${{ secrets.R2_SECRET_ACESS_KEY }}
+      - name: Build nix packages
+        run: |
+          nix shell --print-build-logs -f ./ nix-build-uncached -c \
+              nix-build-uncached ./ci \
+                --argstr ocamlVersion ${{ matrix.setup.ocaml-version }} \
+                --argstr target ${{ matrix.target }} \
+                --show-trace --keep-going
+        continue-on-error: ${{ matrix.setup.continue-on-error }}
