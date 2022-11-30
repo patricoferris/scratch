@@ -1,0 +1,76 @@
+## Content-addressable Store with Version Migrations
+
+Setting up some store content types.
+
+```ocaml
+module Person_v0 = struct
+  type t = {
+    name : string;
+  }
+
+  let version = Store.Version.{ major = 0; minor = 0; patch = 0; }
+
+  let serialise t = `Assoc [ "name", `String t.name ]
+
+  let deserialise = function
+   | `Assoc [ "name", `String name ] -> { name }
+   | _ -> failwith "Failed to deserialise person"
+
+  let equal = Stdlib.( = )
+end
+
+module Person_v0_0_1 = struct
+  type t = {
+    name : string;
+    age : int
+  }
+
+  let version = Store.Version.{ major = 0; minor = 0; patch = 1 }
+
+  let serialise t = 
+    Store.consistent_yojson @@ `Assoc [ "name", `String t.name; "age", `Int t.age ]
+
+  let deserialise = function
+   | `Assoc v -> (
+    match List.assoc_opt "name" v, List.assoc_opt "age" v with
+    | Some (`String name), Some (`Int age) -> { name; age }
+    | _ -> failwith "Failed to deserialise person 2"
+   )
+   | _ -> failwith "Failed to deserialise person 2"
+
+  let equal = Stdlib.( = )
+end
+
+module Store0 = Store.Mem (Store.SHA256) (Person_v0)
+module Store1 = Store.Mem (Store.SHA256) (Person_v0_0_1)
+```
+
+```ocaml
+# let () =
+  let s = Store0.empty () in
+  Fmt.pr "<><><> STORE 0 <><><>\n";
+  let p1 = Person_v0.{ name = "Alice" } in
+  let h = Option.get @@ Store0.add s p1 in
+  Store0.dump s;
+  assert (Option.get @@ Store0.find s h = p1);
+  Fmt.pr "\n<><><> STORE 1 <><><>\n";
+  let h' = Option.get @@ Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 } in
+  Store1.dump s;
+  match Store1.latest s h with
+  | Some (_v, l, h'') -> (
+    Fmt.pr "\nLatest value: %s (%s)\n" l (Store.SHA256.to_hex h'');
+    match Store1.find_raw s h'' with 
+    | Some (_, v) -> 
+      assert (h' = h'')
+    | _ -> assert false
+  )
+  | None -> assert false;;
+<><><> STORE 0 <><><>
+03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"version":{"major":0,"minor":0,"patch":0},"value":{"name":"Alice"}}
+
+<><><> STORE 1 <><><>
+13cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"prev":"03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","diff":[{"no_diff":"name"},{"add_field":"age","diff":42}]}
+03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"version":{"major":0,"minor":0,"patch":0},"value":{"name":"Alice"}}
+
+Latest value: {"age":42,"name":"Alice"} (13cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a)
+```

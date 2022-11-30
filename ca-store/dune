@@ -1,0 +1,6 @@
+(library
+ (name store)
+ (libraries eio digestif yojson)
+ (preprocess (pps ppx_deriving_yojson)))
+
+(mdx (files README.md) (libraries store yojson fmt))
