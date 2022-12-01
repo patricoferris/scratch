@@ -1,21 +1,24 @@
 module type S = Store_intf.S
 
-module Mem (H : Hash.S) (C : Contents.Versioned) = struct
+module Version = Version
+module Serialiser = Serialiser
+module Contents = Contents
+
+module Mem
+    (S : Serialiser.S)
+    (H : Hash.S)
+    (C : Contents.S with type serial = S.t) =
+struct
   type hash = H.t
   type content = C.t
-  type serial = C.Serial.t
+  type serial = C.serial
   type t = (H.t, serial) Hashtbl.t
 
-  module S = C.Serial
+  module Cs = Contents.Make (S) (C)
   module Hd = Hdiff.Make (H) (S)
   module Vs = Version.Make (S)
 
-  let serial_is_versioned s =
-    match S.to_dict s with
-    | [ ("version", v); ("value", value) ] ->
-        Option.map (fun v -> (v, value)) @@ Result.to_option @@ Vs.deserialise v
-    | _ -> None
-
+  let serial_is_versioned s = try Some (Cs.unwrap s) with _ -> None
   let empty : unit -> t = fun () -> Hashtbl.create 128
 
   let backward tbl diff =
@@ -101,12 +104,12 @@ module Mem (H : Hash.S) (C : Contents.Versioned) = struct
 
   let add ?prev tbl c =
     let ser = C.serialise c |> S.normalise |> S.serialise in
-    let st = C.wrap C.version c in
+    let st = Cs.wrap C.version c in
     match Option.bind prev (Hashtbl.find_opt tbl) with
     | None ->
         let hash = H.digest true ser in
         Hashtbl.add tbl hash st;
-        Some hash
+        hash
     | Some stored -> (
         match serial_is_versioned stored with
         | Some (v, old_c) ->
@@ -115,14 +118,14 @@ module Mem (H : Hash.S) (C : Contents.Versioned) = struct
             else
               let new_c = C.serialise c in
               let diff = S.Diff.diff old_c new_c in
-              let s = S.to_string (S.normalise old_c) in
+              let s = S.serialise (S.normalise old_c) in
               let prev = H.digest true s in
               let hashed_diff =
                 Hd.v ~prev ~verified:prev diff |> Hd.serialise
               in
               let new_hash = H.digest false s in
               Hashtbl.add tbl new_hash hashed_diff;
-              Some new_hash
+              new_hash
         | _ ->
             let diff = Hd.deserialise stored in
             (* Need to check versions are okay! *)
@@ -139,7 +142,7 @@ module Mem (H : Hash.S) (C : Contents.Versioned) = struct
             let c = Hd.serialise v in
             let new_hash = H.digest false (S.serialise reconstructed) in
             Hashtbl.add tbl new_hash c;
-            Some new_hash)
+            new_hash)
 
   let dump t =
     Hashtbl.iter (fun k s -> Fmt.pr "%s: %s@." (H.to_hex k) (S.serialise s)) t
@@ -162,4 +165,6 @@ module SHA256 = struct
     String.make 1 v.[0]
     ^ Digestif.SHA256.(
         to_raw_string @@ consistent_of_hex String.(sub v 1 (length v - 1)))
+
+  let pp ppf t = Format.pp_print_string ppf (to_hex t)
 end

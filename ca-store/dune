@@ -1,3 +1,7 @@
 (mdx
  (files README.md)
- (libraries store yojson fmt))
+ (libraries store yojson fmt compiler-libs.toplevel))
+
+(executable
+ (name main)
+ (libraries store))

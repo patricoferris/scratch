@@ -14,7 +14,7 @@ module type S = sig
   val empty : unit -> t
   (** The empty store *)
 
-  val add : ?prev:hash -> t -> content -> hash option
+  val add : ?prev:hash -> t -> content -> hash
   (** [add t c] adds content [c] to store [t] if it doesn't already exist.
       If you bump the version you can specify the previous hash to migrate. *)
 

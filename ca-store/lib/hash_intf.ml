@@ -13,6 +13,8 @@ module type S = sig
 
   val of_hex : string -> t
   (** Of a hex string *)
+
+  val pp : Format.formatter -> t -> unit
 end
 
 module type Intf = sig

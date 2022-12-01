@@ -24,15 +24,13 @@ module type S = sig
   (** The diff *)
 end
 
-module type Maker = functor (H : Hash.S) (Ser : Serialiser.S) -> sig
-  include
-    S with type hash = H.t and type serial = Ser.t and type diff = Ser.Diff.t
-
-  include Serialiser.Serialisable with type t := t and type serial = Ser.t
-end
-
 module type Intf = sig
   module type S = S
 
-  module Make : Maker
+  module Make : functor (H : Hash.S) (Ser : Serialiser.S) -> sig
+    include
+      S with type hash = H.t and type serial = Ser.t and type diff = Ser.Diff.t
+
+    include Serialiser.Serialisable with type t := t and type serial = Ser.t
+  end
 end

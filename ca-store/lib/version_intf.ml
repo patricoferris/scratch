@@ -7,14 +7,13 @@ module type S = sig
   val compare : t -> t -> bool
 end
 
-module type Maker = functor (Ser : Serialiser.S) -> sig
-  include S
-  include Serialiser.Serialisable with type t := t and type serial = Ser.t
-end
-
 module type Intf = sig
   module type S = S
 
   include S
-  module Make : Maker
+
+  module Make : functor (Ser : Serialiser.S) -> sig
+    include S
+    include Serialiser.Serialisable with type t := t and type serial = Ser.t
+  end
 end

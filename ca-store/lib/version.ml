@@ -23,11 +23,10 @@ module Make (S : Serialiser_intf.S) = struct
   let deserialise t =
     match S.to_dict t with
     | [ ("major", major); ("minor", minor); ("patch", patch) ] ->
-        Ok
-          {
-            major = S.to_int major;
-            minor = S.to_int minor;
-            patch = S.to_int patch;
-          }
-    | _ -> Error (`Msg "Malformed version!")
+        {
+          major = S.to_int major;
+          minor = S.to_int minor;
+          patch = S.to_int patch;
+        }
+    | _ -> invalid_arg "Malformed version!"
 end
