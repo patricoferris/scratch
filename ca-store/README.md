@@ -1,6 +1,6 @@
 ## Content-addressable Store with Version Migrations
 
-Setting up some store content types.
+Setting up some store content types. First a simple person with name.
 
 ```ocaml
 module Person_v0 = struct
@@ -18,7 +18,11 @@ module Person_v0 = struct
 
   let equal = Stdlib.( = )
 end
+```
 
+Then a new version of a person, but with an age too!
+
+```ocaml
 module Person_v0_0_1 = struct
   type t = {
     name : string;
@@ -40,10 +44,20 @@ module Person_v0_0_1 = struct
 
   let equal = Stdlib.( = )
 end
+```
 
+After which we can set up two stores for each version of a person. They will actually share the same store later.
+
+```ocaml
 module Store0 = Store.Mem (Store.SHA256) (Person_v0)
 module Store1 = Store.Mem (Store.SHA256) (Person_v0_0_1)
 ```
+
+Now we perform some operations to show off our fancy store.
+
+ 1. We add Alice to the store and dump the store to see the hash and the contents.
+ 2. We double check content-addressed lookup works, we dump to show we stored only the diff.
+ 3. Now we lookup the latest version of the original Alice we stored!
 
 ```ocaml
 # let () =
@@ -54,17 +68,19 @@ module Store1 = Store.Mem (Store.SHA256) (Person_v0_0_1)
   Store0.dump s;
   assert (Option.get @@ Store0.find s h = p1);
   Fmt.pr "\n<><><> STORE 1 <><><>\n";
-  let h' = Option.get @@ Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 } in
+  let h' = 
+    Option.get @@ Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 }
+  in
   Store1.dump s;
   match Store1.latest s h with
-  | Some (_v, l, h'') -> (
-    Fmt.pr "\nLatest value: %s (%s)\n" l (Store.SHA256.to_hex h'');
-    match Store1.find_raw s h'' with 
-    | Some (_, v) -> 
-      assert (h' = h'')
-    | _ -> assert false
-  )
-  | None -> assert false;;
+    | Some (_v, l, h'') -> (
+      Fmt.pr "\nLatest value: %s (%s)\n" l (Store.SHA256.to_hex h'');
+      match Store1.find_raw s h'' with 
+        | Some (_, v) -> 
+          assert (h' = h'')
+        | _ -> assert false
+    )
+    | None -> assert false;;
 <><><> STORE 0 <><><>
 03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"version":{"major":0,"minor":0,"patch":0},"value":{"name":"Alice"}}
 
