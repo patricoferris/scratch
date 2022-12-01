@@ -129,8 +129,10 @@ module Diff = struct
         List m
       end
     in 
+    (* Needs to be fixed!!! *)
     let diff_a = List.map (fun k -> diff_a k) keys_a in
     let diff_b = List.map (fun k -> diff_b k) keys_b in
+    let diff_b = List.filter (function Update_field _ -> false | _ -> true) diff_b in
     List (remove_duplicates (diff_a @ diff_b))
 
   let rec apply_diff (json : Yojson.Basic.t) diff =
