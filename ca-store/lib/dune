@@ -1,0 +1,5 @@
+(library
+ (name store)
+ (libraries eio digestif yojson)
+ (preprocess
+  (pps ppx_deriving_yojson)))
