@@ -42,7 +42,7 @@ module Private_store = struct
   include Json_sha256_mem (Contents)
 
   let transaction_complete t hash =
-    match latest t hash with
+    match latest t hash.content with
     | Some (_, serial, _) -> Option.is_some @@ (Contents.deserialise serial).tx
     | None -> false
 end
@@ -62,13 +62,21 @@ module Global_store = struct
         incr tid;
         store := v ~tid:!tid hash :: !store;
         Some !tid)
+
+  let dump () =
+    List.iter
+      (fun { tid; hash } -> Fmt.pr "%i: %s\n" tid (Store.SHA256.to_hex hash))
+      !store
 end
 
-let transact ~mock_fail store hash =
-  match (Private_store.find store hash, Global_store.add ~mock_fail hash) with
+let transact ~mock_fail store (hash : Private_store.hashes) =
+  match
+    ( Private_store.find store hash.content,
+      Global_store.add ~mock_fail hash.content )
+  with
   | Some v, Some tid ->
       ignore
-        (Private_store.add ~prev:hash store
+        (Private_store.add ~prev:hash.content store
            { v with tx = Some (string_of_int tid) })
   | _ -> failwith "Transaction failed or item doesn't exist"
 
@@ -84,4 +92,5 @@ let () =
   in
   transact ~mock_fail:false store first;
   (try transact ~mock_fail:true store second with _ -> ());
-  assert (Private_store.transaction_complete store first)
+  assert (Private_store.transaction_complete store first);
+  Global_store.dump ()
