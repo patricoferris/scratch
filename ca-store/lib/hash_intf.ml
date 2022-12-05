@@ -5,6 +5,9 @@ module type S = sig
   val digest : string -> t
   (** Digest a string *)
 
+  val to_raw_string : t -> string
+  (** Convert hash to a raw string *)
+
   val to_hex : t -> string
   (** Convert to a hex string *)
 

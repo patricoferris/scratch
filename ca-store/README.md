@@ -1,14 +1,13 @@
 # Content-addressable Store with Version Migrations
 
-<!-- TOC -->
 
 - [Introduction](#introduction)
     - [Setup](#setup)
     - [Basic Store Interactions](#basic-store-interactions)
     - [Getting the Latest Version](#getting-the-latest-version)
+    - [Verifying the Latest Version](#verifying-the-latest-version)
 - [External Transaction](#external-transaction)
 
-<!-- /TOC -->
 
 ## Introduction
 ### Setup
@@ -121,17 +120,17 @@ val s : Store0.t = <abstr>
 # let p1 = Person_v0.{ name = "Alice" };;
 val p1 : Store0.content = {Person_v0.name = "Alice"}
 # let h = Store0.add s p1;;
-val h : Store2.hash = <abstr>
+val h : Store0.hashes = {Store0.content = <abstr>; verifiable = <abstr>}
 ```
 
 Let's inspect the state of the store and assert we still have a content addressed store.
 
 ```ocaml
 # Store0.dump s;;
-3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":null}
+3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"c74f3008fdd2f7c5ae5446ab2e522629f63346f68a4026b4f72b91b393475ff6","diff":null}
 972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
-# assert (Option.get @@ Store0.find s h = p1);;
+# assert (Option.get @@ Store0.find s h.content = p1);;
 - : unit = ()
 ```
 
@@ -139,11 +138,11 @@ Now what if we bump the version of our person to include an age.
 
 ```ocaml
 # let h' =
-  Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 };;
-val h' : Store2.hash = <abstr>
+  Store1.add ~prev:h.content s Person_v0_0_1.{ name = "Alice"; age = 42 };;
+val h' : Store1.hashes = {Store1.content = <abstr>; verifiable = <abstr>}
 # Store1.dump s;;
-3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"age","diff":42},{"no_diff":"name"}]}
-9e5c9e6: {"version":{"major":0,"minor":0,"patch":1},"prev":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","verified":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","diff":null}
+3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"c74f3008fdd2f7c5ae5446ab2e522629f63346f68a4026b4f72b91b393475ff6","diff":[{"add_field":"age","diff":42},{"no_diff":"name"}]}
+9e5c9e6: {"version":{"major":0,"minor":0,"patch":1},"prev":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","verified":"984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9","diff":null}
 972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
 ```
@@ -153,29 +152,72 @@ val h' : Store2.hash = <abstr>
 If we only have the hash for the old value of the person, we can still get the latest value from the store!
 
 ```ocaml
-# match Store0.latest s h with
+# let latest_hash = 
+  match Store0.latest s h.content with
   | Some (_v, l, h'') -> (
-      Fmt.pr "\nLatest value: %s (%s)\n" (J.serialise l) (Store.SHA256.to_hex h'');
-      match Store1.find_raw s h'' with
-      | Some (_, _) -> assert (h' = h'')
+      Fmt.pr "\nLatest value: %s (%s)\n" (J.serialise l) (Store.SHA256.to_hex h''.content);
+      match Store1.find_raw s h''.content with
+      | Some (_, _) -> h''
       | _ -> assert false
   )
   | None -> assert false;;
-Latest value: {"age":42,"name":"Alice"} (9e5c9e6bd593b5c17c0aeb57456a443bceb5d8c7582233f93454199f9d9b0e93)
-- : unit = ()
+Latest value: {"age":42,"name":"Alice"} (3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a)
+val latest_hash : Store0.hashes =
+  {Store0.content = <abstr>; verifiable = <abstr>}
 ```
 
 We can also just get the full history of any version of an item.
 
 ```ocaml
-# Store1.history s h;;
-- : (Store.Version.t * Store2.serial * Store2.hash) list =
-[({Store__.Version.major = 0; minor = 0; patch = 0},
-  `Assoc [("name", `String "Alice")], <abstr>);
- ({Store__.Version.major = 0; minor = 0; patch = 0},
-  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>);
- ({Store__.Version.major = 0; minor = 0; patch = 1},
-  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>)]
+# let history = Store1.history s h.content;;
+val history : (Store.Version.t * Store2.serial * Store1.hashes) list =
+  [({Store__.Version.major = 0; minor = 0; patch = 0},
+    `Assoc [("name", `String "Alice")],
+    {Store1.content = <abstr>; verifiable = <abstr>});
+   ({Store__.Version.major = 0; minor = 0; patch = 1},
+    `Assoc [("age", `Int 42); ("name", `String "Alice")],
+    {Store1.content = <abstr>; verifiable = <abstr>})]
+```
+
+### Verifying the Latest Version
+
+*Status: WIP not entirely sure about this just yet*
+
+Whilst these are nice properties, there's nothing "cryptographically" tying our versions together. The
+store could have sent any version back to you with a convenient hash. However, you may have noticed that
+adding a value to the store returns both the content hash **and the verifiable hash**. This second hash
+forms a hash chain with previous versions allowing you to verify the integrity of the version history.
+
+```ocaml
+# let first_verifiable = h.verifiable;;
+val first_verifiable : Store2.hash = <abstr>
+# let latest_verifiable = latest_hash.verifiable;;
+val latest_verifiable : Store2.hash = <abstr>
+```
+
+We can check how many versions we had using the history function.
+
+```ocaml
+# let rec drop_last acc = function [] -> assert false | [ _ ] -> List.rev acc | x :: xs -> drop_last (x :: acc) xs;;
+val drop_last : 'a list -> 'a list -> 'a list = <fun>
+# let check_hash = 
+    let chain = List.fold_left (fun acc _ -> Store.SHA256.(digest @@ to_raw_string acc)) first_verifiable (drop_last [] history) in
+    let rec _penultimate = function
+      | [] | [ _ ] -> assert false
+      | x :: [ _ ] -> x
+      | _ :: xs -> _penultimate xs
+    in
+      chain;;
+val check_hash : Store2.hash = <abstr>
+```
+
+Now we check against the latest version.
+
+```ocaml
+# Fmt.pr "Expect: %s\nGot:    %s\n" (Store.SHA256.to_hex latest_verifiable) (Store.SHA256.to_hex check_hash);;
+Expect: 984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9
+Got:    984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9
+- : unit = ()
 ```
 
 ## External Transaction
@@ -277,17 +319,19 @@ And now let's add two new pieces of data to our private store.
 # let store = Private_store.empty ();;
 val store : Private_store.t = <abstr>
 # let first = Private_store.add store Private.{ flights = [ { origin = "BFS"; dest = "LHR" } ]; tx = None };;
-val first : Private_store.hash = <abstr>
+val first : Private_store.hashes =
+  {Private_store.content = <abstr>; verifiable = <abstr>}
 # let second = Private_store.add store Private.{ flights = [ { origin = "LHR"; dest = "TLS" } ]; tx = None };;
-val second : Private_store.hash = <abstr>
+val second : Private_store.hashes =
+  {Private_store.content = <abstr>; verifiable = <abstr>}
 ```
 
 And let's commit to our first value and mock a failure for the second value. First we'll build a transact function which can do all of this with only the hash of a stored value.
 
 ```ocaml
-let transact ~mock_fail hash =
-  match Private_store.find store hash, Global_store.add ~mock_fail hash with
-  | Some v, Some tid -> ignore (Private_store.add ~prev:hash store { v with tx = Some (string_of_int tid) })
+let transact ~mock_fail (hash : Private_store.hashes) =
+  match Private_store.find store hash.content, Global_store.add ~mock_fail hash.content with
+  | Some v, Some tid -> ignore (Private_store.add ~prev:hash.content store { v with tx = Some (string_of_int tid) })
   | _ -> failwith "Transaction failed or item doesn't exist"
 ```
 
@@ -304,12 +348,16 @@ With only the original commitment we can now check if the transaction went throu
 
 ```ocaml
 # Private_store.transaction_complete store first;;
-- : bool = true
+Line 1, characters 42-47:
+Error: This expression has type Private_store.hashes
+       but an expression was expected of type Private_store.hash
 ```
 
 And that the second transaction did not.
 
 ```ocaml
 # Private_store.transaction_complete store second;;
-- : bool = false
+Line 1, characters 42-48:
+Error: This expression has type Private_store.hashes
+       but an expression was expected of type Private_store.hash
 ```

@@ -10,6 +10,7 @@ module Mem
     (C : Contents.S with type serial = S.t) =
 struct
   type hash = H.t
+  type hashes = { content : hash; verifiable : hash }
   type content = C.t
   type serial = C.serial
   type t = (H.t, serial) Hashtbl.t
@@ -58,7 +59,7 @@ struct
     | [] | [ _ ] -> List.rev acc
     | x :: xs -> drop_last (x :: acc) xs
 
-  let history (tbl : t) h =
+  let history (tbl : t) (h : hash) =
     let rec forward acc (version : Version.t) ser diff hash =
       let next_ser = Option.map (S.Diff.apply ser) (Hd.diff diff) in
       match (next_ser, Hashtbl.find_opt tbl hash) with
@@ -66,20 +67,28 @@ struct
           let next_hash = S.serialise ser |> H.digest in
           let _, c = Cs.unwrap next_ser in
           let hd = Hd.deserialise diff in
-          let v =
+          let v, verifiable =
             let hd = Hd.deserialise (Hashtbl.find tbl next_hash) in
-            Hd.version hd
+            (Hd.version hd, Hd.verified hd)
           in
-          let acc = (v, c, next_hash) :: acc in
+          let acc = (v, c, { content = next_hash; verifiable }) :: acc in
           forward acc version next_ser hd next_hash
       | None, Some diff ->
+          let verifiable =
+            Hashtbl.find tbl h |> Hd.deserialise |> Hd.verified
+          in
           (* Slight weirdness in how we store version numbers at the end of the chain *)
           let rest = if List.length acc < 1 then [] else List.tl acc in
           let _, s, h =
-            if List.length acc = 0 then (version, ser, hash) else List.hd acc
+            if List.length acc = 0 then
+              (version, ser, { content = h; verifiable })
+            else List.hd acc
           in
-          let v = Hd.version (Hd.deserialise diff) in
-          List.rev ((v, s, h) :: rest)
+          let v, verify =
+            let hd = Hd.deserialise diff in
+            (Hd.version hd, Hd.verified hd)
+          in
+          List.rev ((v, s, { h with verifiable = verify }) :: rest)
       | _ -> List.rev acc
     in
     match Hashtbl.find_opt tbl h with
@@ -92,6 +101,7 @@ struct
               match Hd.diff d with
               | None -> (t, acc)
               | Some diff ->
+                  let verifiable = Hd.verified d in
                   let apply = S.Diff.apply s diff in
                   let next_hash = H.digest (S.serialise apply) in
                   let ((v, s, _) as t) =
@@ -100,7 +110,7 @@ struct
                       Option.map Hd.deserialise
                       @@ Hashtbl.find_opt tbl next_hash )
                   in
-                  (t, (v, s, next_hash) :: acc))
+                  (t, (v, s, { content = next_hash; verifiable }) :: acc))
             ((None, root, None), [])
             diffs
         in
@@ -111,9 +121,12 @@ struct
         in
         match diff with
         | Some diff ->
-            drop_last [] root_to_current
-            @ forward [] (Option.get version) current diff
+            let fwd =
+              forward [] (Option.get version) current diff
                 (S.serialise current |> H.digest)
+            in
+            (* XXX: Definitely doing something wrong here. *)
+            drop_last [] (drop_last [] root_to_current) @ fwd
         | None -> root_to_current)
 
   let rec last = function [] -> None | [ x ] -> Some x | _ :: xs -> last xs
@@ -132,13 +145,14 @@ struct
         let s = S.serialise S.empty in
         let prev = H.digest s in
         let hashed_diff = Hd.v ~verified:prev ~diff C.version |> Hd.serialise in
+        let verifiable = H.to_raw_string prev |> H.digest in
         let entry =
-          Hd.v ~prev:diff_hash ~verified:prev C.version |> Hd.serialise
+          Hd.v ~prev:diff_hash ~verified:verifiable C.version |> Hd.serialise
         in
         let hash = S.serialise new_c |> H.digest in
         Hashtbl.add tbl diff_hash hashed_diff;
         Hashtbl.add tbl hash entry;
-        hash
+        { content = hash; verifiable }
     | Some hash ->
         let stored = Hashtbl.find tbl hash in
         let root, hashed_diffs = backward tbl stored in
@@ -152,11 +166,12 @@ struct
           (Hd.serialise
           @@ Hd.v ?prev:(Hd.prev prev_hd) ~diff:latest_diff
                ~verified:(Hd.verified prev_hd) (Hd.version prev_hd));
-        let v = Hd.v ~prev:prev_hash ~verified:prev_hash C.version in
+        let verifiable = H.digest (H.to_raw_string @@ Hd.verified prev_hd) in
+        let v = Hd.v ~prev:prev_hash ~verified:verifiable C.version in
         let t = Hd.serialise v in
         let new_hash = H.digest (S.serialise content) in
         Hashtbl.add tbl new_hash t;
-        new_hash
+        { content = new_hash; verifiable }
 
   let dump t =
     Hashtbl.iter
@@ -170,6 +185,7 @@ module SHA256 = struct
   let digest s = Digestif.SHA256.(digest_string s |> to_raw_string)
   let to_hex v = Digestif.SHA256.(to_hex @@ of_raw_string v)
   let of_hex v = Digestif.SHA256.(to_raw_string @@ consistent_of_hex v)
+  let to_raw_string s = s
 
   let pp ?(short = false) ppf t =
     if short then Format.pp_print_string ppf (String.sub (to_hex t) 0 7)

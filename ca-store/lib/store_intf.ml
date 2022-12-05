@@ -5,6 +5,10 @@ module type S = sig
   type hash
   (** Hash type *)
 
+  type hashes = { content : hash; verifiable : hash }
+  (** The content hash and another hash that can be used to verify
+        the chain of versions. *)
+
   type content
   (** Content type *)
 
@@ -14,7 +18,7 @@ module type S = sig
   val empty : unit -> t
   (** The empty store *)
 
-  val add : ?prev:hash -> t -> content -> hash
+  val add : ?prev:hash -> t -> content -> hashes
   (** [add t c] adds content [c] to store [t] if it doesn't already exist.
       If you bump the version you can specify the previous hash to migrate. *)
 
@@ -27,11 +31,11 @@ module type S = sig
   val find_raw : t -> hash -> (Version.t * serial) option
   (** Like {! find} but returns the raw stored value *)
 
-  val latest : t -> hash -> (Version.t * serial * hash) option
+  val latest : t -> hash -> (Version.t * serial * hashes) option
   (** [latest t hash] is like {! find} except it finds the latest version of the
       contents if any. *)
 
-  val history : t -> hash -> (Version.t * serial * hash) list
+  val history : t -> hash -> (Version.t * serial * hashes) list
   (** [history t hash] gets [hash]'s full history in the store. *)
 
   val dump : t -> unit
