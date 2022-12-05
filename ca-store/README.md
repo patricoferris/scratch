@@ -288,7 +288,7 @@ module Private_store = struct
   include Json_sha256_mem (Contents)
 
   let transaction_complete t hash =
-    match latest t hash with
+    match latest t hash.content with
     | Some (_, serial, _) -> Option.is_some @@ (Contents.deserialise serial).tx 
     | None -> false
 end
@@ -348,16 +348,12 @@ With only the original commitment we can now check if the transaction went throu
 
 ```ocaml
 # Private_store.transaction_complete store first;;
-Line 1, characters 42-47:
-Error: This expression has type Private_store.hashes
-       but an expression was expected of type Private_store.hash
+- : bool = true
 ```
 
 And that the second transaction did not.
 
 ```ocaml
 # Private_store.transaction_complete store second;;
-Line 1, characters 42-48:
-Error: This expression has type Private_store.hashes
-       but an expression was expected of type Private_store.hash
+- : bool = false
 ```
