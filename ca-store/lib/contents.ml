@@ -12,6 +12,7 @@ module Make (S : Serialiser.S) (C : S with type serial = S.t) = struct
   let unwrap t =
     match S.to_dict t with
     | [ ("version", version); ("value", value) ] ->
+        Fmt.pr "Unwrapping %s\n" (S.serialise version);
         (Ver.deserialise version, value)
     | _ -> invalid_arg "Failed to deserialise"
 

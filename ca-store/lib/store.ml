@@ -54,41 +54,53 @@ struct
         else failwith "Version mismatch")
       (find_raw tbl h)
 
-  let latest (tbl : t) h =
-    let rec forward (version : Version.t) ser diff hash =
+  let history (tbl : t) h =
+    let rec forward acc (version : Version.t) ser diff hash =
       let next_ser = Option.map (S.Diff.apply ser) (Hd.diff diff) in
       let next_hash = S.serialise ser |> H.digest in
       match (next_ser, Hashtbl.find_opt tbl next_hash) with
       | Some next_ser, Some diff ->
-          forward version next_ser (Hd.deserialise diff) next_hash
-      | _ -> (version, ser, hash)
+          let v, c = Cs.unwrap next_ser in
+          let acc = (v, c, next_hash) :: acc in
+          forward acc version next_ser (Hd.deserialise diff) next_hash
+      | _ -> List.rev ((version, ser, hash) :: acc)
     in
     match Hashtbl.find_opt tbl h with
-    | None -> None
+    | None -> []
     | Some t -> (
         let root, diffs = backward tbl t in
-        let version, current, diff =
+        let (version, current, diff), acc =
           List.fold_left
-            (fun (_, s, _) d ->
-              let apply = S.Diff.apply s (Hd.diff_exn d) in
-              let next_hash = H.digest (S.serialise apply) in
-              ( Some (Hd.version d),
-                apply,
-                Option.map Hd.deserialise @@ Hashtbl.find_opt tbl next_hash ))
-            (None, root, None) diffs
+            (fun (((_, s, _) as t), acc) d ->
+              match Hd.diff d with
+              | None -> (t, acc)
+              | Some diff ->
+                  let apply = S.Diff.apply s diff in
+                  let next_hash = H.digest (S.serialise apply) in
+                  let ((v, s, _) as t) =
+                    ( Some (Hd.version d),
+                      apply,
+                      Option.map Hd.deserialise
+                      @@ Hashtbl.find_opt tbl next_hash )
+                  in
+                  (t, (v, s, next_hash) :: acc))
+            ((None, root, None), [])
+            diffs
+        in
+        let root_to_current =
+          List.filter_map
+            (function Some v, s, h -> Some (v, s, h) | _ -> None)
+            (List.rev acc)
         in
         match diff with
         | Some diff ->
-            Some
-              (forward (Option.get version) current diff
-                 (S.serialise current |> H.digest))
-        | None ->
-            Some (Option.get version, current, S.serialise current |> H.digest))
+            root_to_current
+            @ forward [] (Option.get version) current diff
+                (S.serialise current |> H.digest)
+        | None -> root_to_current)
 
-  (* let rec last = function
-     | [] -> assert false
-     | [ x ] -> x
-     | _ :: rest -> last rest *)
+  let rec last = function [] -> None | [ x ] -> Some x | _ :: xs -> last xs
+  let latest t h = history t h |> last
 
   let update tbl hash v =
     Hashtbl.remove tbl hash;

@@ -165,6 +165,21 @@ Latest value: {"age":42,"name":"Alice"} (9e5c9e6bd593b5c17c0aeb57456a443bceb5d8c
 - : unit = ()
 ```
 
+We can also just get the full history of any version of an item.
+
+```ocaml
+# Store1.history s h;;
+- : (Store.Version.t * Store2.serial * Store2.hash) list =
+[({Store__.Version.major = 0; minor = 0; patch = 0},
+  `Assoc [("name", `String "Alice")], <abstr>);
+ ({Store__.Version.major = 0; minor = 0; patch = 0},
+  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>);
+ ({Store__.Version.major = 0; minor = 0; patch = 0},
+  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>);
+ ({Store__.Version.major = 0; minor = 0; patch = 0},
+  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>)]
+```
+
 ## External Transaction
 
 Sometimes you want to commit to a value. That is to say, we tell everyone the hash of some 
@@ -292,4 +307,11 @@ With only the original commitment we can now check if the transaction went throu
 ```ocaml
 # Private_store.transaction_complete store first;;
 - : bool = true
+```
+
+And that the second transaction did not.
+
+```ocaml
+# Private_store.transaction_complete store second;;
+- : bool = false
 ```

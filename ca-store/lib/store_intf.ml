@@ -31,5 +31,8 @@ module type S = sig
   (** [latest t hash] is like {! find} except it finds the latest version of the
       contents if any. *)
 
+  val history : t -> hash -> (Version.t * serial * hash) list
+  (** [history t hash] gets [hash]'s full history in the store. *)
+
   val dump : t -> unit
 end
