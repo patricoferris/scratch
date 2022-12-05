@@ -174,9 +174,7 @@ We can also just get the full history of any version of an item.
   `Assoc [("name", `String "Alice")], <abstr>);
  ({Store__.Version.major = 0; minor = 0; patch = 0},
   `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>);
- ({Store__.Version.major = 0; minor = 0; patch = 0},
-  `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>);
- ({Store__.Version.major = 0; minor = 0; patch = 0},
+ ({Store__.Version.major = 0; minor = 0; patch = 1},
   `Assoc [("age", `Int 42); ("name", `String "Alice")], <abstr>)]
 ```
 

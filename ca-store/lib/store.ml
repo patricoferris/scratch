@@ -54,16 +54,33 @@ struct
         else failwith "Version mismatch")
       (find_raw tbl h)
 
+  let rec drop_last acc = function
+    | [] | [ _ ] -> List.rev acc
+    | x :: xs -> drop_last (x :: acc) xs
+
   let history (tbl : t) h =
     let rec forward acc (version : Version.t) ser diff hash =
       let next_ser = Option.map (S.Diff.apply ser) (Hd.diff diff) in
-      let next_hash = S.serialise ser |> H.digest in
-      match (next_ser, Hashtbl.find_opt tbl next_hash) with
+      match (next_ser, Hashtbl.find_opt tbl hash) with
       | Some next_ser, Some diff ->
-          let v, c = Cs.unwrap next_ser in
+          let next_hash = S.serialise ser |> H.digest in
+          let _, c = Cs.unwrap next_ser in
+          let hd = Hd.deserialise diff in
+          let v =
+            let hd = Hd.deserialise (Hashtbl.find tbl next_hash) in
+            Hd.version hd
+          in
           let acc = (v, c, next_hash) :: acc in
-          forward acc version next_ser (Hd.deserialise diff) next_hash
-      | _ -> List.rev ((version, ser, hash) :: acc)
+          forward acc version next_ser hd next_hash
+      | None, Some diff ->
+          (* Slight weirdness in how we store version numbers at the end of the chain *)
+          let rest = if List.length acc < 1 then [] else List.tl acc in
+          let _, s, h =
+            if List.length acc = 0 then (version, ser, hash) else List.hd acc
+          in
+          let v = Hd.version (Hd.deserialise diff) in
+          List.rev ((v, s, h) :: rest)
+      | _ -> List.rev acc
     in
     match Hashtbl.find_opt tbl h with
     | None -> []
@@ -94,7 +111,7 @@ struct
         in
         match diff with
         | Some diff ->
-            root_to_current
+            drop_last [] root_to_current
             @ forward [] (Option.get version) current diff
                 (S.serialise current |> H.digest)
         | None -> root_to_current)
