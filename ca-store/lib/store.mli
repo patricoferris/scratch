@@ -6,10 +6,7 @@ module Contents = Contents
 
 module Mem : functor
   (S : Serialiser.S)
-  (* (_ : sig
-       val version : Version.t
-     end) *)
-(H : Hash.S)
+  (H : Hash.S)
   (C : Contents.S with type serial = S.t)
   ->
   S
@@ -18,4 +15,4 @@ module Mem : functor
      and type serial = C.serial constraint C.serial = S.t
      and type t = (H.t, C.serial) Hashtbl.t
 
-module SHA256 : Hash.S with type t = string
+module SHA256 : Hash.S

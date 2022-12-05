@@ -11,6 +11,10 @@ module type S = sig
   val equal : t -> t -> bool
   (** Equality of serialisation formats. *)
 
+  val empty : t
+  (** Empty object like thing... *)
+
+  val null : t
   val of_int : int -> t
   val to_int : t -> int
   val of_string : string -> t

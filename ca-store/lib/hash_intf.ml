@@ -2,11 +2,8 @@ module type S = sig
   type t
   (** A hash *)
 
-  val digest : bool -> string -> t
+  val digest : string -> t
   (** Digest a string *)
-
-  val root : t -> bool
-  (** Hashed a root or not *)
 
   val to_hex : t -> string
   (** Convert to a hex string *)
@@ -14,7 +11,7 @@ module type S = sig
   val of_hex : string -> t
   (** Of a hex string *)
 
-  val pp : Format.formatter -> t -> unit
+  val pp : ?short:bool -> Format.formatter -> t -> unit
 end
 
 module type Intf = sig

@@ -1,99 +1,87 @@
 module J = Store.Serialiser.Json
 
-module Person_v0 = struct
-  type t = { name : string }
-  type serial = J.t
+module Private = struct
+  type t = { flights : flight list; tx : string option }
+  and flight = { origin : string; dest : string }
 
   let version = Store.Version.{ major = 0; minor = 0; patch = 0 }
-  let serialise t = `Assoc [ ("name", `String t.name) ]
 
-  let deserialise = function
-    | `Assoc [ ("name", `String name) ] -> { name }
-    | _ -> failwith "Failed to deserialise person"
-
-  let equal = Stdlib.( = )
-end
-
-module Person_v0_0_1 = struct
-  type t = { name : string; age : int }
   type serial = J.t
 
-  let version = Store.Version.{ major = 0; minor = 0; patch = 1 }
+  let equal = Stdlib.( = )
 
   let serialise t =
-    J.normalise @@ `Assoc [ ("name", `String t.name); ("age", `Int t.age) ]
+    let flight f =
+      J.normalise
+      @@ `Assoc [ ("origin", `String f.origin); ("dest", `String f.dest) ]
+    in
+    let tx = match t.tx with Some tx -> `String tx | None -> `Null in
+    let v =
+      `Assoc [ ("flights", `List (List.map flight t.flights)); ("tx", tx) ]
+    in
+    J.normalise v
+
+  let deserialise_flight = function
+    | `Assoc [ ("dest", `String dest); ("origin", `String origin) ] ->
+        { origin; dest }
+    | _ -> invalid_arg "Flight!"
+
+  let get_string = function `String s -> s | _ -> invalid_arg "not a string"
 
   let deserialise = function
-    | `Assoc v -> (
-        match (List.assoc_opt "name" v, List.assoc_opt "age" v) with
-        | Some (`String name), Some (`Int age) -> { name; age }
-        | _ -> failwith "Failed to deserialise person 2")
-    | _ -> failwith "Failed to deserialise person 2"
-
-  let equal = Stdlib.( = )
-end
-
-module Person_v0_0_2 = struct
-  type t = { name : string; nick : string; age : int }
-  type serial = J.t
-
-  let version = Store.Version.{ major = 0; minor = 0; patch = 2 }
-
-  let serialise t =
-    J.normalise
-    @@ `Assoc
-         [
-           ("name", `String t.name);
-           ("age", `Int t.age);
-           ("nick", `String t.nick);
-         ]
-
-  let deserialise = function
-    | `Assoc v -> (
-        match
-          ( List.assoc_opt "name" v,
-            List.assoc_opt "age" v,
-            List.assoc_opt "nick" v )
-        with
-        | Some (`String name), Some (`Int age), Some (`String nick) ->
-            { name; age; nick }
-        | _ -> failwith "Failed to deserialise person 3")
-    | _ -> failwith "Failed to deserialise person 3"
-
-  let equal = Stdlib.( = )
+    | `Assoc [ ("flights", `List flights); ("tx", tx) ] ->
+        let tx = if J.equal `Null tx then None else Some (get_string tx) in
+        { flights = List.map deserialise_flight flights; tx }
+    | v -> invalid_arg ("flights " ^ J.serialise v)
 end
 
 module Json_sha256_mem = Store.Mem (J) (Store.SHA256)
-module Name = Store.Contents.Make (J) (Person_v0)
-module Store0 = Json_sha256_mem (Name)
-module With_age = Store.Contents.Make (J) (Person_v0_0_1)
-module Store1 = Json_sha256_mem (With_age)
-module With_nick = Store.Contents.Make (J) (Person_v0_0_2)
-module Store2 = Json_sha256_mem (With_nick)
+module Contents = Store.Contents.Make (J) (Private)
+
+module Private_store = struct
+  include Json_sha256_mem (Contents)
+
+  let transaction_complete t hash =
+    match latest t hash with
+    | Some (_, serial, _) -> Option.is_some @@ (Contents.deserialise serial).tx
+    | None -> false
+end
+
+module Global_store = struct
+  type commitment = { tid : int; hash : Private_store.hash }
+  and t = commitment list
+
+  let v ~tid hash = { tid; hash }
+  let store : t ref = ref []
+
+  let add =
+    let tid = ref 0 in
+    fun ?(mock_fail = false) hash ->
+      if mock_fail then None
+      else (
+        incr tid;
+        store := v ~tid:!tid hash :: !store;
+        Some !tid)
+end
+
+let transact ~mock_fail store hash =
+  match (Private_store.find store hash, Global_store.add ~mock_fail hash) with
+  | Some v, Some tid ->
+      ignore
+        (Private_store.add ~prev:hash store
+           { v with tx = Some (string_of_int tid) })
+  | _ -> failwith "Transaction failed or item doesn't exist"
 
 let () =
-  let s = Store0.empty () in
-  Fmt.pr "<><><> STORE 0 <><><>\n";
-  let p1 = Person_v0.{ name = "Alice" } in
-  let h = Option.get @@ Store0.add s p1 in
-  Store0.dump s;
-  assert (Option.get @@ Store0.find s h = p1);
-  Fmt.pr "\n<><><> STORE 1 <><><>\n";
-  let h' =
-    Option.get
-    @@ Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 }
+  let store = Private_store.empty () in
+  let first =
+    Private_store.add store
+      Private.{ flights = [ { origin = "BFS"; dest = "LHR" } ]; tx = None }
   in
-  Store1.dump s;
-  (match Store1.latest s h with
-  | Some (_v, l, h'') -> (
-      Fmt.pr "\nLatest value: %s (%s)\n" (J.serialise l)
-        (Store.SHA256.to_hex h'');
-      match Store1.find_raw s h'' with
-      | Some (_, _) -> assert (h' = h'')
-      | _ -> assert false)
-  | None -> assert false);
-  Fmt.pr "\n<><><> STORE 2 <><><>\n"
-(* let h' =
-     Option.get @@ Store2.add ~prev:h' s Person_v0_0_2.{ name = "Alice"; age = 43; nick = "A" }
-   in
-   Store2.dump s;; *)
+  let second =
+    Private_store.add store
+      Private.{ flights = [ { origin = "LHR"; dest = "TLS" } ]; tx = None }
+  in
+  transact ~mock_fail:false store first;
+  (try transact ~mock_fail:true store second with _ -> ());
+  assert (Private_store.transaction_complete store first)

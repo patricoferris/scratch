@@ -1,10 +1,8 @@
-## Content-addressable Store with Version Migrations
+# Content-addressable Store with Version Migrations
 
-Before we begin, we will install a pretty printer for the hashes!
 
-```ocaml
-# #install_printer Store.SHA256.pp;;
-```
+## Introduction
+### Setup
 
 We will be using the provided JSON serialiser.
 
@@ -103,6 +101,8 @@ module With_nick = Store.Contents.Make (J) (Person_v0_0_2)
 module Store2 = Json_sha256_mem (With_nick)
 ```
 
+### Basic Store Interactions
+
 Now we perform some operations to show off our fancy store. First we create an empty
 store and add a new person at version 0 to it.
 
@@ -110,19 +110,17 @@ store and add a new person at version 0 to it.
 # let s = Store0.empty ();;
 val s : Store0.t = <abstr>
 # let p1 = Person_v0.{ name = "Alice" };;
-val p1 : Store0.content =
-  {Person_v0.name =
-    <printer Store.SHA256.pp raised an exception: Invalid_argument("invalid hash size")>}
+val p1 : Store0.content = {Person_v0.name = "Alice"}
 # let h = Store0.add s p1;;
-val h : string =
-  03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a
+val h : Store2.hash = <abstr>
 ```
 
 Let's inspect the state of the store and assert we still have a content addressed store.
 
 ```ocaml
 # Store0.dump s;;
-03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"version":{"major":0,"minor":0,"patch":0},"value":{"name":"Alice"}}
+3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":null}
+972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
 # assert (Option.get @@ Store0.find s h = p1);;
 - : unit = ()
@@ -133,18 +131,20 @@ Now what if we bump the version of our person to include an age.
 ```ocaml
 # let h' =
   Store1.add ~prev:h s Person_v0_0_1.{ name = "Alice"; age = 42 };;
-val h' : string =
-  13cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a
+val h' : Store2.hash = <abstr>
 # Store1.dump s;;
-13cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"prev":"03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","verified":"03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","diff":[{"no_diff":"name"},{"add_field":"age","diff":42}]}
-03cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a: {"version":{"major":0,"minor":0,"patch":0},"value":{"name":"Alice"}}
+3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"age","diff":42},{"no_diff":"name"}]}
+9e5c9e6: {"version":{"major":0,"minor":0,"patch":1},"prev":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","verified":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","diff":null}
+972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
 ```
+
+### Getting the Latest Version
 
 If we only have the hash for the old value of the person, we can still get the latest value from the store!
 
 ```ocaml
-# match Store1.latest s h with
+# match Store0.latest s h with
   | Some (_v, l, h'') -> (
       Fmt.pr "\nLatest value: %s (%s)\n" (J.serialise l) (Store.SHA256.to_hex h'');
       match Store1.find_raw s h'' with
@@ -152,6 +152,135 @@ If we only have the hash for the old value of the person, we can still get the l
       | _ -> assert false
   )
   | None -> assert false;;
-Latest value: {"age":42,"name":"Alice"} (13cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a)
+Latest value: {"age":42,"name":"Alice"} (9e5c9e6bd593b5c17c0aeb57456a443bceb5d8c7582233f93454199f9d9b0e93)
 - : unit = ()
+```
+
+## External Transaction
+
+Sometimes you want to commit to a value. That is to say, we tell everyone the hash of some 
+private data and this prevents us from tampering with it in the future. When it comes to
+auditing the data, auditors can be sure the data we committed to is indeed that data.
+
+However, where do we public commit to this data. Perhaps a distributed ledger of some sort.
+It would be great if we could then associate the successful recording of our commitment in
+the private store. This would mean either having a separate store or mutating our original
+private data, but this would break the hash!
+
+We can however do this withour store.
+
+```ocaml
+module Private = struct
+  type t = { 
+    flights : flight list;
+    tx : string option
+  } and flight = {
+    origin : string;
+    dest : string;
+  }
+
+  let version = Store.Version.{ major = 0; minor = 0; patch = 0 }
+
+  type serial = J.t
+
+  let equal = Stdlib.( = )
+
+  let serialise t =
+    let flight f = 
+      J.normalise @@ `Assoc [
+        "origin", `String f.origin;
+        "dest", `String f.dest
+       ] 
+    in
+    let tx = match t.tx with Some tx -> `String tx | None -> `Null in
+    let v = `Assoc [ "flights", `List (List.map flight t.flights); "tx", tx ] in
+    J.normalise v
+
+  let deserialise_flight = function
+    | `Assoc [ "dest", `String dest; "origin", `String origin ] -> { origin; dest }
+    | _ -> invalid_arg "Flight!"
+
+  let get_string = function `String s -> s | _ -> invalid_arg "not a string"
+
+  let deserialise = function
+    | `Assoc [ "flights", `List flights; "tx", tx ] -> 
+      let tx = if J.equal `Null tx then None else Some (get_string tx) in
+      { flights = List.map deserialise_flight flights; tx }
+    | _ -> invalid_arg "flights"
+end
+```
+
+Because we have used a `string option` for our transaction, the committed version of this is identical.
+
+```ocaml
+module Committed = Private
+```
+
+We can now construct our private store.
+
+```ocaml
+module Contents = Store.Contents.Make (J) (Private)
+module Private_store = struct 
+  include Json_sha256_mem (Contents)
+
+  let transaction_complete t hash =
+    match latest t hash with
+    | Some (_, serial, _) -> Option.is_some @@ (Contents.deserialise serial).tx 
+    | None -> false
+end
+```
+
+In order to commit to our values, we'll create a global store where we record the hash of the private data.
+
+```ocaml
+module Global_store = struct
+  type commitment = { tid : int; hash : Private_store.hash }
+  and t = commitment list
+
+  let store : t ref = ref []
+
+  let add = 
+    let tid = ref 0 in
+    fun ?(mock_fail = false) hash ->
+    if mock_fail then None else (incr tid; store := { tid = !tid; hash } :: !store; Some !tid)
+
+  let dump () =
+    List.iter (fun { tid; hash } -> Fmt.pr "%i: %s\n" tid (Store.SHA256.to_hex hash)) !store
+end
+```
+
+And now let's add two new pieces of data to our private store.
+
+```ocaml
+# let store = Private_store.empty ();;
+val store : Private_store.t = <abstr>
+# let first = Private_store.add store Private.{ flights = [ { origin = "BFS"; dest = "LHR" } ]; tx = None };;
+val first : Private_store.hash = <abstr>
+# let second = Private_store.add store Private.{ flights = [ { origin = "LHR"; dest = "TLS" } ]; tx = None };;
+val second : Private_store.hash = <abstr>
+```
+
+And let's commit to our first value and mock a failure for the second value. First we'll build a transact function which can do all of this with only the hash of a stored value.
+
+```ocaml
+let transact ~mock_fail hash =
+  match Private_store.find store hash, Global_store.add ~mock_fail hash with
+  | Some v, Some tid -> ignore (Private_store.add ~prev:hash store { v with tx = Some (string_of_int tid) })
+  | _ -> failwith "Transaction failed or item doesn't exist"
+```
+
+And now we can perform the transactions.
+
+```ocaml
+# transact ~mock_fail:false first;;
+- : unit = ()
+# transact ~mock_fail:true second;;
+Exception: Failure "Transaction failed or item doesn't exist".
+```
+
+With only the original commitment we can now check if the transaction went through.
+
+```ocaml
+# Private_store.transaction_complete store first;;
+- : bool = true
 ```

@@ -1,7 +1,20 @@
 include Serialiser_intf
 
+type json_diff_simple =
+  | Add_field of string * Yojson.Basic.t
+  | Remove_field of string * Yojson.Basic.t
+  | Update_field of string * Yojson.Basic.t
+  | List of json_diff_simple list
+  | Nest of string * json_diff
+  | No_diff of string
+
+and json_diff = json_diff_simple
+
 module Json = struct
   type t = Yojson.Basic.t
+
+  let empty = `Assoc []
+  let null = `Null
 
   module U = Yojson.Basic.Util
 
@@ -27,9 +40,10 @@ module Json = struct
     | `List l, `List l' ->
         List.for_all (fun (v, v') -> equal v v') (List.combine l l')
     | `Assoc a, `Assoc a' ->
-        List.for_all
-          (fun ((k, v), (k', v')) -> String.equal k k' && equal v v')
-          (List.combine a a')
+        List.length a = List.length a'
+        && List.for_all
+             (fun ((k, v), (k', v')) -> String.equal k k' && equal v v')
+             (List.combine a a')
     | _ -> false
 
   let of_dict assoc = `Assoc assoc
@@ -44,16 +58,7 @@ module Json = struct
 
   module Diff = struct
     type serial = t
-
-    type diff =
-      | Add_field of string * serial
-      | Remove_field of string * serial
-      | Update_field of string * serial
-      | List of diff list
-      | Nest of string * diff
-      | No_diff of string
-
-    and t = diff
+    type t = json_diff
 
     let rec diff_to_yojson = function
       | Add_field (s, j) -> `Assoc [ ("add_field", `String s); ("diff", j) ]
@@ -84,67 +89,91 @@ module Json = struct
 
     let deserialise : Yojson.Basic.t -> t = function
       | `List diffs -> List (List.map diff_of_yojson diffs)
-      | x -> Fmt.failwith "Failed to deserialise diff! %a" Yojson.Basic.pp x
+      | x ->
+          Fmt.failwith "Failed to deserialise diff, not a list! %a"
+            Yojson.Basic.pp x
 
     let is_not_object = function `Assoc _ -> false | #Yojson.Basic.t -> true
 
-    let diff_simple k v v' =
+    let diff_update k v v' =
       match (v, v') with
-      | v, None | v, Some `Null -> Add_field (k, v)
-      | `String s, Some (`String s' as u) ->
+      | `Null, u -> if u = `Null then No_diff k else Update_field (k, u)
+      | `String s, (`String s' as u) ->
           if String.equal s s' then No_diff k else Update_field (k, u)
-      | `Float s, Some (`Float s' as u) ->
+      | `Float s, (`Float s' as u) ->
           if Float.equal s s' then No_diff k else Update_field (k, u)
-      | `Bool s, Some (`Bool s' as u) ->
+      | `Bool s, (`Bool s' as u) ->
           if Bool.equal s s' then No_diff k else Update_field (k, u)
-      | `Int s, Some (`Int s' as u) ->
+      | `Int s, (`Int s' as u) ->
           if Int.equal s s' then No_diff k else Update_field (k, u)
-      | `List v, Some (`List s' as u) ->
+      | `List v, (`List s' as u) ->
           if v = s' then No_diff k else Update_field (k, u)
       | _ -> No_diff k
 
-    let remove_duplicates diffs =
+    let _remove_duplicates diffs =
       List.fold_left
         (fun acc v -> if List.mem v acc then acc else v :: acc)
         [] diffs
       |> List.rev
 
-    let find k v = try Some (U.member k v) with _ -> None
+    let get_obj = function
+      | `Assoc assoc -> assoc
+      | _ -> failwith "Not an object"
 
-    let diff a b : t =
+    let rec diff a b : t =
+      let assoc_a = get_obj a in
+      let assoc_b = get_obj b in
       let keys_a = U.keys a in
       let keys_b = U.keys b in
-      let rec diff_a k =
-        let v = Option.get @@ find k a in
-        let v' = find k b in
-        if is_not_object v then diff_simple k v v'
-        else
-          let m = List.map diff_a (U.keys v) in
-          List m
+      let fields_to_remove =
+        List.filter_map
+          (fun k ->
+            if List.mem k keys_b then None
+            else Some (Remove_field (k, List.assoc k assoc_a)))
+          keys_a
       in
-      let rec diff_b k =
-        let v = Option.get @@ find k b in
-        let v' = find k a in
-        if is_not_object v then diff_simple k v v'
-        else
-          let m = List.map diff_b (U.keys v) in
-          List m
+      let fields_to_add =
+        List.filter_map
+          (fun k ->
+            if List.mem k keys_a then None
+            else Some (Add_field (k, List.assoc k assoc_b)))
+          keys_b
       in
-      (* Needs to be fixed!!! *)
-      let diff_a = List.map (fun k -> diff_a k) keys_a in
-      let diff_b = List.map (fun k -> diff_b k) keys_b in
-      let diff_b =
-        List.filter (function Update_field _ -> false | _ -> true) diff_b
+      let nested_and_updates =
+        List.filter_map
+          (fun k ->
+            if List.mem k keys_a then
+              let a_value = U.member k a in
+              let b_value = U.member k b in
+              if is_not_object b_value then Some (diff_update k a_value b_value)
+              else Some (Nest (k, diff a_value b_value))
+            else None)
+          keys_b
       in
-      List (remove_duplicates (diff_a @ diff_b))
+      List (fields_to_remove @ fields_to_add @ nested_and_updates)
 
     let rec apply_diff (json : Yojson.Basic.t) diff =
       match (json, diff) with
-      | `Assoc a, Add_field (s, j) -> `Assoc ((s, j) :: a)
-      | `Assoc a, Remove_field (s, _) ->
-          `Assoc (List.filter (fun (k, _) -> s = k) a)
+      | `Assoc _, Add_field (s, j) ->
+          `Assoc [ (s, j) ]
+          (* let did_update = ref false in
+             let assoc =
+               List.map
+                 (fun (k, v) ->
+                   if k = s && v = `Null then (
+                     did_update := true;
+                     (k, j))
+                   else (k, v))
+                 a
+             in
+             if !did_update then `Assoc assoc else `Assoc ((s, j) :: a) *)
+      | `Assoc _, Remove_field (_, _) ->
+          `Assoc [] (* `Assoc (List.filter (fun (k, _) -> s = k) a) *)
       | `Assoc a, Update_field (s, j) ->
-          `Assoc (List.map (fun ((k, _) as t) -> if k = s then (k, j) else t) a)
+          `Assoc
+            (List.filter_map
+               (fun (k, _) -> if k = s then Some (k, j) else None)
+               a)
       | `List v, List diffs ->
           `List (List.map2 (fun v d -> apply_diff v d) v diffs)
       | (`Assoc _ as v), List diffs ->
@@ -156,7 +185,7 @@ module Json = struct
               (function `Assoc assoc -> Some assoc | _ -> None)
               assoc
           in
-          `Assoc (remove_duplicates @@ List.concat assoc)
+          `Assoc (List.concat assoc)
       | `Assoc a, Nest (s, diff) ->
           let a' =
             List.map
@@ -164,12 +193,19 @@ module Json = struct
               a
           in
           `Assoc a'
+      | `Assoc j, No_diff k ->
+          `Assoc
+            (List.filter_map
+               (fun ((k', _) as t) -> if k = k' then Some t else None)
+               j)
       | j, No_diff _ -> j
       | _ -> `Null
 
     let apply json diff : Yojson.Basic.t =
       match (json, diff) with
-      | (`Assoc _ as v), diff -> normalise @@ apply_diff v diff
+      | (`Assoc _ as v), diff ->
+          let v = normalise @@ apply_diff v diff in
+          v
       | _ -> failwith "Failed to apply diff."
   end
 end
