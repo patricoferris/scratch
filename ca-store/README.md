@@ -201,13 +201,7 @@ We can check how many versions we had using the history function.
 # let rec drop_last acc = function [] -> assert false | [ _ ] -> List.rev acc | x :: xs -> drop_last (x :: acc) xs;;
 val drop_last : 'a list -> 'a list -> 'a list = <fun>
 # let check_hash = 
-    let chain = List.fold_left (fun acc _ -> Store.SHA256.(digest @@ to_raw_string acc)) first_verifiable (drop_last [] history) in
-    let rec _penultimate = function
-      | [] | [ _ ] -> assert false
-      | x :: [ _ ] -> x
-      | _ :: xs -> _penultimate xs
-    in
-      chain;;
+    List.fold_left (fun acc _ -> Store.SHA256.(digest @@ to_raw_string acc)) first_verifiable (drop_last [] history);;
 val check_hash : Store2.hash = <abstr>
 ```
 
