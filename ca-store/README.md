@@ -24,7 +24,7 @@ Next we set up some store content types. First a simple person with name.
 module Person_v0 = struct
   type t = {
     name : string;
-  }[@@deriving yojson]
+  }
 
   type serial = J.t
 
