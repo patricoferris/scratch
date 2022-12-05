@@ -1,5 +1,14 @@
 # Content-addressable Store with Version Migrations
 
+<!-- TOC -->
+
+- [Introduction](#introduction)
+    - [Setup](#setup)
+    - [Basic Store Interactions](#basic-store-interactions)
+    - [Getting the Latest Version](#getting-the-latest-version)
+- [External Transaction](#external-transaction)
+
+<!-- /TOC -->
 
 ## Introduction
 ### Setup
