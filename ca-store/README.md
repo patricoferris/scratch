@@ -116,7 +116,7 @@ store and add a new person at version 0 to it.
 
 ```ocaml
 # let s = Store0.empty ();;
-val s : Store0.t = <abstr>
+val s : Store0.t = {Store.prev = <abstr>; diffs = <abstr>}
 # let p1 = Person_v0.{ name = "Alice" };;
 val p1 : Store0.content = {Person_v0.name = "Alice"}
 # let h = Store0.add s p1;;
@@ -127,8 +127,8 @@ Let's inspect the state of the store and assert we still have a content addresse
 
 ```ocaml
 # Store0.dump s;;
-3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"c74f3008fdd2f7c5ae5446ab2e522629f63346f68a4026b4f72b91b393475ff6","diff":null}
-972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
+3cba1e3: (972f698) none
+972f698: (44136fa) {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
 # assert (Option.get @@ Store0.find s h.content = p1);;
 - : unit = ()
@@ -141,10 +141,15 @@ Now what if we bump the version of our person to include an age.
   Store1.add ~prev:h.content s Person_v0_0_1.{ name = "Alice"; age = 42 };;
 val h' : Store1.hashes = {Store1.content = <abstr>; verifiable = <abstr>}
 # Store1.dump s;;
-3cba1e3: {"version":{"major":0,"minor":0,"patch":0},"prev":"972f698e90f92ae3c0ec5c6faff3217156c8f592b55322e92899e91c967620a4","verified":"c74f3008fdd2f7c5ae5446ab2e522629f63346f68a4026b4f72b91b393475ff6","diff":[{"add_field":"age","diff":42},{"no_diff":"name"}]}
-9e5c9e6: {"version":{"major":0,"minor":0,"patch":1},"prev":"3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a","verified":"984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9","diff":null}
-972f698: {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
+3cba1e3: (972f698) {"version":{"major":0,"minor":0,"patch":1},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"age","diff":42},{"no_diff":"name"}]}
+9e5c9e6: (3cba1e3) none
+972f698: (44136fa) {"version":{"major":0,"minor":0,"patch":0},"prev":null,"verified":"44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a","diff":[{"add_field":"name","diff":"Alice"}]}
 - : unit = ()
+# Store0.find_raw s h.content;;
+- : (Store.Version.t * Store2.serial) option =
+Some
+ ({Store__.Version.major = 0; minor = 0; patch = 0},
+  `Assoc [("name", `String "Alice")])
 ```
 
 ### Getting the Latest Version
@@ -161,7 +166,7 @@ If we only have the hash for the old value of the person, we can still get the l
       | _ -> assert false
   )
   | None -> assert false;;
-Latest value: {"age":42,"name":"Alice"} (3cba1e3cf23c8ce24b7e08171d823fbd9a4929aafd9f27516e30699d3a42026a)
+Latest value: {"age":42,"name":"Alice"} (9e5c9e6bd593b5c17c0aeb57456a443bceb5d8c7582233f93454199f9d9b0e93)
 val latest_hash : Store0.hashes =
   {Store0.content = <abstr>; verifiable = <abstr>}
 ```
@@ -207,12 +212,10 @@ val check_hash : Store2.hash = <abstr>
 
 Now we check against the latest version.
 
-```ocaml
 # Fmt.pr "Expect: %s\nGot:    %s\n" (Store.SHA256.to_hex latest_verifiable) (Store.SHA256.to_hex check_hash);;
 Expect: 984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9
 Got:    984f616cbadd14fb359b33c9633ff722c5a058db71b45b3b6dac4c5accf869e9
 - : unit = ()
-```
 
 ## External Transaction
 
@@ -311,7 +314,7 @@ And now let's add two new pieces of data to our private store.
 
 ```ocaml
 # let store = Private_store.empty ();;
-val store : Private_store.t = <abstr>
+val store : Private_store.t = {Store.prev = <abstr>; diffs = <abstr>}
 # let first = Private_store.add store Private.{ flights = [ { origin = "BFS"; dest = "LHR" } ]; tx = None };;
 val first : Private_store.hashes =
   {Private_store.content = <abstr>; verifiable = <abstr>}
