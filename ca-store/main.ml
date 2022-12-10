@@ -78,7 +78,9 @@ let transact ~mock_fail store (hash : Private_store.hashes) =
       ignore
         (Private_store.add ~prev:hash.content store
            { v with tx = Some (string_of_int tid) })
-  | _ -> failwith "Transaction failed or item doesn't exist"
+  | None, _ ->
+      failwith ("Item doesn't exist " ^ Store.SHA256.to_hex hash.content)
+  | _, None -> failwith "Transaction failed"
 
 let () =
   let store = Private_store.empty () in
@@ -93,4 +95,5 @@ let () =
   transact ~mock_fail:false store first;
   (try transact ~mock_fail:true store second with _ -> ());
   assert (Private_store.transaction_complete store first);
+  Private_store.dump store;
   Global_store.dump ()
