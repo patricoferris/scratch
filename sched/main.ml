@@ -28,8 +28,6 @@ type _ Effect.t += Get : Uri.t -> string Effect.t
 module Par = struct
   open Effect
 
-  type !'a task = private (unit -> 'a)
-
   type _ Effect.t += Start : 'a Hmap.key Effect.t
   type _ Effect.t += Task : ((unit -> 'b) list Hmap.key * (unit -> 'b)) -> unit Effect.t
   type _ Effect.t += End : (unit -> 'b) list Hmap.key -> 'b list Effect.t
