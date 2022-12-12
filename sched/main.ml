@@ -65,7 +65,7 @@ module Http = struct
           (* Ideally we would reinstall the HTTP handler in case the callback does some more HTTP things!  
              let doms = List.map (fun t -> Domain.spawn (fun () -> fork t)) tasks in
              
-             The extra fork is really important otherwise it basically runs sequentially
+             The extra Eio fork with fibers is really important otherwise it basically runs sequentially
              because of how domain manager works!
 
              I think more to be learnt from https://watch.ocaml.org/videos/watch/08ea09a1-e645-47cb-80c4-499dd4d93ac8
