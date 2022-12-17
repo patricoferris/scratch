@@ -1,3 +1,5 @@
 (executable
  (name main)
- (libraries eio eio_main uri eio.unix hmap))
+ (libraries domainslib eio eio.utils eio_main uri eio.unix hmap fmt))
+
+(vendored_dirs eio)

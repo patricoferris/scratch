@@ -1,0 +1,3 @@
+[submodule "sched/eio"]
+	path = sched/eio
+	url = https://github.com/patricoferris/eio
