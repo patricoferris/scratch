@@ -1,0 +1,5 @@
+(let
+    ((remove (lambda (x) (
+        cdr (cdr x)
+     ))))
+    (lambda (private) (remove private)))
