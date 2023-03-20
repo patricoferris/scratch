@@ -1,0 +1,6 @@
+(mdx (libraries irmin))
+
+(executable
+ (name main)
+ (libraries irmin irmin.mem eio_main)
+ (preprocess (pps ppx_irmin)))
