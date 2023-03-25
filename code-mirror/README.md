@@ -1,0 +1,1 @@
+Pin https://github.com/patricoferris/jsoo-code-mirror and off you go.

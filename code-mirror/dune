@@ -1,0 +1,8 @@
+(executable
+ (name main)
+ (modes js)
+ (libraries code-mirror))
+
+(alias
+ (name default)
+ (deps main.bc.js index.html))
