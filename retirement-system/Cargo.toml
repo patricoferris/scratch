@@ -1,0 +1,25 @@
+[package]
+name = "retirement-system"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[profile.release]
+lto = true
+
+
+[dependencies]
+tezos_smart_rollup_core = { git = "https://gitlab.com/tezos/tezos" }
+tezos_smart_rollup_host = { git = "https://gitlab.com/tezos/tezos" }
+tezos_smart_rollup_debug = { git = "https://gitlab.com/tezos/tezos" }
+tezos_smart_rollup_encoding = { git = "https://gitlab.com/tezos/tezos" }
+tezos_smart_rollup_storage = { git = "https://gitlab.com/tezos/tezos" }
+tezos_smart_rollup_entrypoint = { git = "https://gitlab.com/tezos/tezos" }
+lurk = { path = "./lurk-rs", package = "lurk" }
+fcomm = { path = "./lurk-rs/fcomm", package = "fcomm" }
+
+[replace]
+"neptune:8.1.1" = { path = "vendor/neptune.8.1.1" }
+"getrandom:0.2.8" = { path = "vendor/getrandom" }

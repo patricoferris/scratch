@@ -1,0 +1,13 @@
+[unstable]
+build-std-features = ["compiler-builtins-mem"]
+build-std = ["core", "compiler_builtins"]
+
+[source.crates-io]
+replace-with = "vendored-sources"
+
+[source."https://gitlab.com/tezos/tezos"]
+git = "https://gitlab.com/tezos/tezos"
+replace-with = "vendored-sources"
+
+[source.vendored-sources]
+directory = "vendor"

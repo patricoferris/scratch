@@ -1,0 +1,281 @@
+version: 2.1
+
+setup-env: &setup-env
+  MSRV: 1.60.0
+  RUSTFLAGS: "-Dwarnings"
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+  RUST_LOG: info
+
+executors:
+  default:
+    machine:
+      image: ubuntu-2004:202101-01
+    working_directory: ~/lurk
+    resource_class: xlarge
+  arm64:
+    machine:
+      image: ubuntu-2004:202101-01
+    working_directory: ~/lurk
+    resource_class: arm.large
+  darwin:
+    macos:
+      xcode: "14.2.0"
+    working_directory: ~/lurk
+    resource_class: macos.x86.medium.gen2
+
+commands:
+  set_env_path:
+    steps:
+      - run:
+          name: Set the PATH env variable
+          command: |
+            # we need access to rustup in the next command
+            export PATH=~/.cargo/bin:$PATH
+            # Also put the Rust LLVM tools into the PATH. `rustc` hooks into the rust-toolchain at the root of the repo
+            echo "export PATH=$HOME:~/.cargo/bin:$(dirname $(find $(rustc --print sysroot) -name 'rust-lld')):$PATH" | tee -a $BASH_ENV
+            source $BASH_ENV
+
+  set_versions_n_runners:
+    steps:
+      - run:
+          name: Install rustup
+          command: |
+            curl --proto '=https' --tlsv1.2 https://sh.rustup.rs -sSf | sh -s -- -y
+      - run:
+          name: Install nextest
+          command: |
+            # Get host target
+            host=$(rustc -Vv|grep host|sed -Ee 's/host: //')
+            # Normalize the host for MacOS downloads
+            url="https://get.nexte.st/latest/${host/*-apple-darwin/universal-apple-darwin}.tar.gz"
+            # Debug
+            echo "Fetching nextest at $url" 
+            # If nextest isn't here already
+            [ -f ${CARGO_HOME:-~/.cargo/bin}/cargo-nextest ] ||
+            # Download binary and install to $HOME/.cargo/bin
+            curl -LsSf "$url" | tar xzf - -C $HOME/.cargo/bin
+      - run:
+          name: Print versions
+          command: |
+            rustup show
+            cargo --version
+            rustc --version
+
+  save_rustup_cache:
+    steps:
+      - save_cache:
+          name: "Save rustup cache"
+          key: cargo-v2-{{ checksum "rust-toolchain.toml" }}-{{ checksum "Cargo.toml" }}-{{ checksum "Cargo.lock" }}-{{ arch }}
+          paths:
+            - "~/.cargo"
+            - "~/.rustup"
+
+  restore_rustup_cache:
+      steps:
+        - restore_cache:
+            keys:
+              - cargo-v2-{{ checksum "rust-toolchain.toml" }}-{{ checksum "Cargo.toml" }}-{{ checksum "Cargo.lock" }}-{{ arch }}
+
+  install_gpu_deps:
+    steps:
+      - run: sudo apt update && sudo apt install -y ocl-icd-opencl-dev curl build-essential
+
+jobs:
+  cargo_fetch:
+    executor: default
+    environment: *setup-env
+    steps:
+      - checkout
+      - run:
+          name: Update submodules
+          command: |
+            git submodule update --init --recursive
+      - restore_rustup_cache
+      - set_env_path
+      - set_versions_n_runners
+      - run: cargo fetch
+      - run: rm -rf .git
+      - persist_to_workspace:
+          root: ~/
+          paths:
+            - lurk
+      - save_rustup_cache
+
+  linux:
+    executor: default
+    environment: *setup-env
+    steps:
+      - checkout
+      - attach_workspace:
+          at: "~/"
+      - install_gpu_deps
+      - restore_rustup_cache
+      - run: sudo apt install clang
+      - set_env_path
+      - run: rustup target add wasm32-unknown-unknown
+      - run:
+          name: Wasm Build
+          command: cargo build --target wasm32-unknown-unknown
+      - run:
+          name: Linux Tests
+          command: cargo nextest run --profile ci --workspace
+          no_output_timeout: 120m
+
+  linux_release:
+    executor: default
+    environment: *setup-env
+    steps:
+      - checkout
+      - attach_workspace:
+          at: "~/"
+      - restore_rustup_cache
+      - set_env_path
+      - install_gpu_deps
+      - run:
+          name: Linux Tests
+          command: cargo nextest run --profile ci --release --workspace --run-ignored all -E 'all() - test(groth16::tests::outer_prove_recursion)'
+      - run:
+          name: Linux benchmarks compile successfully
+          command: cargo bench --no-run
+      - run:
+          name: Linux Doc Tests
+          command: cargo test --doc --workspace
+
+  arm64:
+    executor: arm64
+    environment: *setup-env
+    steps:
+      - checkout
+      - run:
+          name: Update submodules
+          command: |
+            git submodule update --init --recursive
+      - attach_workspace:
+          at: "~/"
+      - set_versions_n_runners
+      - set_env_path
+      - install_gpu_deps
+      - run:
+          name: Arm64 Tests
+          command: cargo nextest run --profile ci --release --workspace
+          no_output_timeout: 120m
+      - run:
+          name: Arm64 benchmarks compile successfully
+          command: cargo bench --no-run
+      - run:
+          name: Arm64 Doc Tests
+          command: cargo test --doc --workspace
+
+  mac:
+    executor: darwin
+    environment: *setup-env
+    steps:
+      - checkout
+      - run:
+          name: Update submodules
+          command: git submodule update --init --recursive
+      - attach_workspace:
+           at: "~/"
+      - set_versions_n_runners
+      - set_env_path
+      - run:
+          name: MacOS Tests
+          command: cargo nextest run --profile ci --release --workspace
+          no_output_timeout: 120m
+      - run:
+          name: MacOS benchmarks compile successfully
+          command: cargo bench --no-run
+      - run:
+          name: MacOS Doc Tests
+          command: cargo test --doc --workspace
+
+  clippy:
+    executor: default
+    environment: *setup-env
+    steps:
+      - checkout
+      - set_env_path
+      - attach_workspace:
+          at: "~/"
+      - restore_rustup_cache
+      - run: cargo clippy --all -- -D warnings
+      
+  rustfmt:
+    executor: default
+    environment: *setup-env
+    steps:
+      - checkout
+      - set_env_path
+      - attach_workspace:
+          at: "~/"
+      - restore_rustup_cache
+      - run: cargo fmt --all -- --check
+      
+workflows:
+  test-all:
+    jobs:
+      - cargo_fetch:
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - linux:
+          requires:
+            - cargo_fetch
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - arm64:
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - mac:
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - linux_release:
+          requires:
+            - cargo_fetch
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - rustfmt:
+          requires:
+            - cargo_fetch
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
+      - clippy:
+          requires:
+            - cargo_fetch
+          filters:
+            branches:
+                ignore: 
+                  - gh-pages
+                  - staging.tmp
+                  - trying.tmp
+                  - staging-squash-merge.tmp
